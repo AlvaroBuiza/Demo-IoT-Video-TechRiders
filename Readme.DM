@@ -39,4 +39,4 @@ ESP32 · DHT22 · MQTT · broker EMQX (público) · MQTT.js · HTML/CSS/JS · Wo
 
 **Autor:** Álvaro Buiza
 Máster Desarrollo Full Stack + Arquitecturas Cloud · Tajamar Tech · 2025-2026
-Post: [URL DEL POST] · Vídeo: [URL DEL VÍDEO]
+
