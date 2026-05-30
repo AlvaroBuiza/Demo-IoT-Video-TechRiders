@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Estación IoT · Panel de telemetría</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<style>
+  :root{
+    --bg:#0a0e0d;
+    --panel:#111714;
+    --panel-2:#0d1411;
+    --line:#1f2b25;
+    --text:#e6f0ea;
+    --muted:#6f8278;
+    --signal:#3ce6a0;     /* verde señal */
+    --signal-dim:#1d6b4c;
+    --alert:#ff5d4d;       /* rojo alerta */
+    --amber:#ffb347;
+    --grid:#16201b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:
+      radial-gradient(900px 500px at 80% -10%, rgba(60,230,160,.08), transparent 60%),
+      radial-gradient(700px 400px at -10% 110%, rgba(255,93,77,.06), transparent 60%),
+      var(--bg);
+    color:var(--text);
+    font-family:"IBM Plex Mono", monospace;
+    min-height:100vh;
+    padding:28px 20px 60px;
+    background-attachment:fixed;
+  }
+  .wrap{max-width:1080px;margin:0 auto}
+  header{
+    display:flex;justify-content:space-between;align-items:flex-end;
+    flex-wrap:wrap;gap:16px;
+    border-bottom:1px solid var(--line);padding-bottom:18px;margin-bottom:24px;
+  }
+  .brand h1{
+    font-family:"Bricolage Grotesque",sans-serif;font-weight:800;
+    font-size:clamp(26px,4vw,40px);letter-spacing:-.02em;line-height:1;
+  }
+  .brand span{color:var(--signal)}
+  .brand p{color:var(--muted);font-size:12px;margin-top:8px;letter-spacing:.04em}
+  .status{
+    display:flex;align-items:center;gap:10px;font-size:13px;
+    border:1px solid var(--line);border-radius:999px;padding:8px 16px;background:var(--panel);
+    white-space:nowrap;
+  }
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--muted);box-shadow:0 0 0 0 transparent}
+  .dot.on{background:var(--signal);box-shadow:0 0 12px var(--signal);animation:pulse 1.6s infinite}
+  .dot.err{background:var(--alert);box-shadow:0 0 12px var(--alert)}
+  @keyframes pulse{0%{opacity:1}50%{opacity:.35}100%{opacity:1}}
+
+  .config{
+    display:flex;flex-wrap:wrap;gap:12px;align-items:end;
+    background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:16px;margin-bottom:24px;
+  }
+  .field{display:flex;flex-direction:column;gap:6px}
+  .field label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+  .field input{
+    background:var(--panel-2);border:1px solid var(--line);color:var(--text);
+    font-family:inherit;font-size:14px;padding:10px 12px;border-radius:9px;min-width:160px;
+  }
+  .field input:focus{outline:none;border-color:var(--signal-dim)}
+  button{
+    font-family:inherit;font-weight:600;font-size:14px;cursor:pointer;
+    border-radius:9px;padding:11px 18px;border:1px solid transparent;transition:.15s;
+  }
+  .btn-go{background:var(--signal);color:#04130c}
+  .btn-go:hover{filter:brightness(1.1)}
+  .btn-stop{background:transparent;border-color:var(--line);color:var(--muted)}
+  .btn-stop:hover{border-color:var(--alert);color:var(--alert)}
+
+  .alert-banner{
+    display:none;align-items:center;gap:12px;
+    background:rgba(255,93,77,.12);border:1px solid var(--alert);color:#ffd0ca;
+    border-radius:12px;padding:14px 18px;margin-bottom:22px;font-size:14px;
+  }
+  .alert-banner.show{display:flex;animation:flash 1s ease}
+  @keyframes flash{from{background:rgba(255,93,77,.35)}to{background:rgba(255,93,77,.12)}}
+
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
+  @media(max-width:640px){.grid{grid-template-columns:1fr}}
+  .card{
+    background:linear-gradient(180deg,var(--panel),var(--panel-2));
+    border:1px solid var(--line);border-radius:16px;padding:22px;position:relative;overflow:hidden;
+  }
+  .card::after{content:"";position:absolute;inset:0;border-radius:16px;pointer-events:none;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
+  .card .tag{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
+  .card .val{
+    font-family:"Bricolage Grotesque",sans-serif;font-weight:800;
+    font-size:clamp(44px,9vw,72px);line-height:1;margin-top:10px;letter-spacing:-.03em;
+    transition:color .2s;
+  }
+  .card .unit{font-size:.4em;color:var(--muted);font-weight:600;margin-left:6px}
+  .card.hot .val{color:var(--alert)}
+  .card .sub{color:var(--muted);font-size:12px;margin-top:10px}
+
+  .panel-wide{grid-column:1 / -1}
+  .chart-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+  .chart-head h2{font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:16px;letter-spacing:-.01em}
+  .legend{display:flex;gap:16px;font-size:12px;color:var(--muted)}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:middle}
+  canvas{width:100%;height:200px;display:block}
+
+  .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .controls .tag{margin-right:auto}
+  .btn-led-on{background:var(--amber);color:#1a1206}
+  .btn-led-off{background:var(--panel-2);border-color:var(--line);color:var(--text)}
+
+  .log{
+    grid-column:1 / -1;background:var(--panel-2);border:1px solid var(--line);
+    border-radius:14px;padding:16px;height:160px;overflow:auto;font-size:12.5px;line-height:1.7;
+  }
+  .log .line{color:var(--muted)}
+  .log .line b{color:var(--signal);font-weight:600}
+  .foot{color:var(--muted);font-size:11px;text-align:center;margin-top:28px;letter-spacing:.04em}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <h1>ESTACIÓN <span>IoT</span></h1>
+      <p>PANEL DE TELEMETRÍA EN TIEMPO REAL · MQTT / ESP32</p>
+    </div>
+    <div class="status">
+      <span class="dot" id="dot"></span>
+      <span id="statusText">Desconectado</span>
+    </div>
+  </header>
+
+  <div class="config">
+    <div class="field">
+      <label>ID único (el mismo del ESP32)</label>
+      <input id="idInput" value="CAMBIA-ESTO-123" />
+    </div>
+    <div class="field">
+      <label>Umbral de alerta (°C)</label>
+      <input id="umbral" type="number" value="30" />
+    </div>
+    <button class="btn-go" id="btnConnect">Conectar</button>
+    <button class="btn-stop" id="btnDisconnect">Desconectar</button>
+  </div>
+
+  <div class="alert-banner" id="alertBanner">
+    ⚠️ <span id="alertText">Temperatura por encima del umbral</span>
+  </div>
+
+  <div class="grid">
+    <div class="card" id="cardTemp">
+      <div class="tag">Temperatura</div>
+      <div class="val" id="tempVal">--<span class="unit">°C</span></div>
+      <div class="sub" id="tempSub">Esperando datos…</div>
+    </div>
+    <div class="card" id="cardHum">
+      <div class="tag">Humedad</div>
+      <div class="val" id="humVal">--<span class="unit">%</span></div>
+      <div class="sub" id="humSub">Esperando datos…</div>
+    </div>
+
+    <div class="card panel-wide">
+      <div class="chart-head">
+        <h2>Histórico en vivo</h2>
+        <div class="legend">
+          <span><i style="background:var(--signal)"></i>Temp °C</span>
+          <span><i style="background:#5aa9ff"></i>Humedad %</span>
+        </div>
+      </div>
+      <canvas id="chart" width="1000" height="200"></canvas>
+    </div>
+
+    <div class="card panel-wide">
+      <div class="controls">
+        <span class="tag">Actuador remoto (LED del dispositivo)</span>
+        <button class="btn-led-on" id="btnOn">Encender LED</button>
+        <button class="btn-led-off" id="btnOff">Apagar LED</button>
+      </div>
+    </div>
+
+    <div class="log" id="log"></div>
+  </div>
+
+  <p class="foot">Máster Desarrollo Full Stack + Arquitecturas Cloud · Tajamar Tech · 2025-2026</p>
+</div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  let client = null;
+  let topicDatos = "", topicComando = "";
+  const histT = [], histH = [], MAXP = 40;
+
+  function log(msg, accent=false){
+    const el = document.createElement("div");
+    el.className = "line";
+    const t = new Date().toLocaleTimeString();
+    el.innerHTML = accent ? `[${t}] <b>${msg}</b>` : `[${t}] ${msg}`;
+    $("log").prepend(el);
+  }
+
+  function setStatus(txt, state){ // state: '', 'on', 'err'
+    $("statusText").textContent = txt;
+    $("dot").className = "dot" + (state ? " " + state : "");
+  }
+
+  function conectar(){
+    const id = $("idInput").value.trim();
+    if(!id){ alert("Pon tu ID único"); return; }
+    topicDatos   = `tajamar/iot/${id}/estacion/datos`;
+    topicComando = `tajamar/iot/${id}/estacion/comando`;
+
+    if(client){ client.end(true); }
+    setStatus("Conectando…", "");
+    log(`Conectando al broker (wss://broker.emqx.io:8084)…`);
+
+    client = mqtt.connect("wss://broker.emqx.io:8084/mqtt", {
+      clientId: "dashboard-" + Math.random().toString(16).slice(2,8),
+      reconnectPeriod: 3000,
+    });
+
+    client.on("connect", () => {
+      setStatus("Conectado", "on");
+      client.subscribe(topicDatos);
+      log(`Suscrito a <b>${topicDatos}</b>`, true);
+    });
+    client.on("reconnect", () => setStatus("Reconectando…",""));
+    client.on("error", e => { setStatus("Error de conexión","err"); log("Error: " + e.message); });
+    client.on("close", () => setStatus("Desconectado",""));
+
+    client.on("message", (topic, payload) => {
+      try{
+        const d = JSON.parse(payload.toString());
+        actualizar(d.temp, d.hum);
+        log(`Recibido: ${d.temp}°C · ${d.hum}%`);
+      }catch(err){ log("Mensaje no válido: " + payload.toString()); }
+    });
+  }
+
+  function desconectar(){
+    if(client){ client.end(true); client = null; }
+    setStatus("Desconectado","");
+    log("Desconectado por el usuario");
+  }
+
+  function actualizar(temp, hum){
+    const umbral = parseFloat($("umbral").value);
+    $("tempVal").innerHTML = `${temp.toFixed(1)}<span class="unit">°C</span>`;
+    $("humVal").innerHTML  = `${hum.toFixed(1)}<span class="unit">%</span>`;
+    $("tempSub").textContent = `Último dato · ${new Date().toLocaleTimeString()}`;
+    $("humSub").textContent  = `Último dato · ${new Date().toLocaleTimeString()}`;
+
+    const caliente = temp > umbral;
+    $("cardTemp").classList.toggle("hot", caliente);
+    $("alertBanner").classList.toggle("show", caliente);
+    if(caliente){
+      $("alertText").textContent = `Temperatura ${temp.toFixed(1)}°C supera el umbral de ${umbral}°C`;
+    }
+
+    histT.push(temp); histH.push(hum);
+    if(histT.length > MAXP){ histT.shift(); histH.shift(); }
+    dibujar();
+  }
+
+  function enviarComando(cmd){
+    if(!client || !client.connected){ alert("Conéctate primero"); return; }
+    client.publish(topicComando, cmd);
+    log(`Comando enviado al dispositivo: <b>${cmd}</b>`, true);
+  }
+
+  // ---- mini gráfico en canvas (sin librerías externas) ----
+  const cv = $("chart"), ctx = cv.getContext("2d");
+  function linea(arr, color, min, max){
+    if(arr.length < 2) return;
+    const w = cv.width, h = cv.height, pad = 10;
+    ctx.beginPath();
+    arr.forEach((v,i)=>{
+      const x = pad + (i/(MAXP-1))*(w-2*pad);
+      const y = h-pad - ((v-min)/(max-min))*(h-2*pad);
+      i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+    });
+    ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.lineJoin="round"; ctx.stroke();
+  }
+  function dibujar(){
+    ctx.clearRect(0,0,cv.width,cv.height);
+    // rejilla
+    ctx.strokeStyle = "#16201b"; ctx.lineWidth = 1;
+    for(let i=0;i<=4;i++){ const y=10+i*((cv.height-20)/4);
+      ctx.beginPath();ctx.moveTo(10,y);ctx.lineTo(cv.width-10,y);ctx.stroke(); }
+    linea(histT, "#3ce6a0", 0, 50);   // temp 0–50°C
+    linea(histH, "#5aa9ff", 0, 100);  // humedad 0–100%
+  }
+
+  $("btnConnect").onclick = conectar;
+  $("btnDisconnect").onclick = desconectar;
+  $("btnOn").onclick  = () => enviarComando("ON");
+  $("btnOff").onclick = () => enviarComando("OFF");
+  log("Listo. Pon tu ID y pulsa Conectar.");
+</script>
+</body>
+</html>
